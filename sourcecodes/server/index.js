@@ -79,6 +79,7 @@ app.get('/api/projects', (req, res) => {
       Project.ptitle,
       Project.pstatus,
       Project.pdescription,
+      Project.isPublic,
       Professor.pname as professorName,
       group_concat(Student.sname separator ', ') as studentNames,
       group_concat(ProjectMember.role separator ', ') as studentRoles
@@ -92,6 +93,7 @@ app.get('/api/projects', (req, res) => {
       Project.ptitle,
       Project.pstatus,
       Project.pdescription,
+      Project.isPublic,
       Professor.pname
   `;
 
@@ -112,6 +114,7 @@ app.get('/api/professors/:profId/projects', (req, res) => {
       Project.ptitle,
       Project.pstatus,
       Project.pdescription,
+      Project.isPublic,
       group_concat(Student.sname separator ', ') as studentNames,
       group_concat(ProjectMember.role separator ', ') as studentRoles
     from Project
@@ -123,12 +126,89 @@ app.get('/api/professors/:profId/projects', (req, res) => {
       Project.projName,
       Project.ptitle,
       Project.pstatus,
-      Project.pdescription
+      Project.pdescription,
+      Project.isPublic
   `;
 
   db.query(sql, [profId], (err, results) => {
     if (err) return res.status(500).json({ message: err.sqlMessage });
     res.json(results);
+  });
+});
+
+// Public project list for students who want to request to join.
+app.get('/api/students/:studentId/public-projects', (req, res) => {
+  const { studentId } = req.params;
+
+  const sql = `
+    select
+      Project.Proj_ID,
+      Project.projName,
+      Project.ptitle,
+      Project.pstatus,
+      Project.pdescription,
+      Professor.pname as professorName,
+      ProjectRequest.requestStatus
+    from Project
+    join Professor on Project.Prof_ID = Professor.Prof_ID
+    left join ProjectMember
+      on Project.Proj_ID = ProjectMember.Proj_ID
+      and ProjectMember.Student_ID = ?
+    left join ProjectRequest
+      on Project.Proj_ID = ProjectRequest.Proj_ID
+      and ProjectRequest.Student_ID = ?
+    where Project.isPublic = 1
+      and ProjectMember.Student_ID is null
+    order by Project.projName
+  `;
+
+  db.query(sql, [studentId, studentId], (err, results) => {
+    if (err) return res.status(500).json({ message: err.sqlMessage });
+    res.json(results);
+  });
+});
+
+// Student project stats.
+app.get('/api/students/:studentId/project-stats', (req, res) => {
+  const { studentId } = req.params;
+
+  const sql = `
+    select
+      (select count(*) from ProjectMember where Student_ID = ?) as enrolledProjects,
+      (select count(*) from ProjectRequest where Student_ID = ? and requestStatus = 'Pending') as pendingRequests,
+      sum(case when Project.pstatus = 'Active' then 1 else 0 end) as activeProjects,
+      sum(case when Project.pstatus = 'Planned' then 1 else 0 end) as plannedProjects,
+      sum(case when Project.pstatus = 'Completed' then 1 else 0 end) as completedProjects
+    from ProjectMember
+    join Project on ProjectMember.Proj_ID = Project.Proj_ID
+    where ProjectMember.Student_ID = ?
+  `;
+
+  db.query(sql, [studentId, studentId, studentId], (err, results) => {
+    if (err) return res.status(500).json({ message: err.sqlMessage });
+    res.json(results[0]);
+  });
+});
+
+// Professor project stats.
+app.get('/api/professors/:profId/project-stats', (req, res) => {
+  const { profId } = req.params;
+
+  const sql = `
+    select
+      count(*) as totalProjects,
+      sum(case when isPublic = 1 then 1 else 0 end) as publicProjects,
+      sum(case when isPublic = 0 then 1 else 0 end) as privateProjects,
+      sum(case when pstatus = 'Active' then 1 else 0 end) as activeProjects,
+      sum(case when pstatus = 'Planned' then 1 else 0 end) as plannedProjects,
+      sum(case when pstatus = 'Completed' then 1 else 0 end) as completedProjects
+    from Project
+    where Prof_ID = ?
+  `;
+
+  db.query(sql, [profId], (err, results) => {
+    if (err) return res.status(500).json({ message: err.sqlMessage });
+    res.json(results[0]);
   });
 });
 
@@ -269,15 +349,15 @@ app.post('/api/login', (req, res) => {
 
 // Create a new project.
 app.post('/api/projects', (req, res) => {
-  const { projName, ptitle, pstatus, pdescription, Prof_ID } = req.body;
+  const { projName, ptitle, pstatus, pdescription, isPublic, Prof_ID } = req.body;
 
   if (!projName || !ptitle || !pstatus || !pdescription || !Prof_ID) {
     return res.status(400).json({ message: 'missing project information' });
   }
 
   db.query(
-    'insert into Project(projName, ptitle, pstatus, pdescription, Prof_ID) values (?, ?, ?, ?, ?)',
-    [projName, ptitle, pstatus, pdescription, Prof_ID],
+    'insert into Project(projName, ptitle, pstatus, pdescription, isPublic, Prof_ID) values (?, ?, ?, ?, ?, ?)',
+    [projName, ptitle, pstatus, pdescription, isPublic ? 1 : 0, Prof_ID],
     (err, results) => {
       if (err) return res.status(500).json(err);
 
@@ -289,18 +369,18 @@ app.post('/api/projects', (req, res) => {
   );
 });
 
-// Update only the project status.
+// Update the project status and public/private visibility.
 app.put('/api/projects/:projectId/status', (req, res) => {
   const { projectId } = req.params;
-  const { pstatus } = req.body;
+  const { pstatus, isPublic } = req.body;
 
   if (!pstatus) {
     return res.status(400).json({ message: 'missing project status' });
   }
 
   db.query(
-    'update Project set pstatus = ? where Proj_ID = ?',
-    [pstatus, projectId],
+    'update Project set pstatus = ?, isPublic = ? where Proj_ID = ?',
+    [pstatus, isPublic ? 1 : 0, projectId],
     (err, results) => {
       if (err) return res.status(500).json({ message: err.sqlMessage });
 
@@ -308,7 +388,7 @@ app.put('/api/projects/:projectId/status', (req, res) => {
         return res.status(404).json({ message: 'project not found' });
       }
 
-      res.json({ message: 'project status updated successfully!' });
+      res.json({ message: 'project updated successfully!' });
     }
   );
 });
@@ -372,6 +452,104 @@ app.post('/api/project-members', (req, res) => {
     (err) => {
       if (err) return res.status(500).json({ message: err.sqlMessage });
       res.json({ message: 'student added to project!' });
+    }
+  );
+});
+
+// Student requests to join a public project.
+app.post('/api/project-requests', (req, res) => {
+  const { Student_ID, Proj_ID } = req.body;
+
+  if (!Student_ID || !Proj_ID) {
+    return res.status(400).json({ message: 'missing request information' });
+  }
+
+  db.query(
+    `insert into ProjectRequest(Student_ID, Proj_ID, requestStatus, requestDate)
+     values (?, ?, 'Pending', CURDATE())
+     on duplicate key update requestStatus = 'Pending', requestDate = CURDATE()`,
+    [Student_ID, Proj_ID],
+    (err) => {
+      if (err) return res.status(500).json({ message: err.sqlMessage });
+      res.json({ message: 'request sent successfully!' });
+    }
+  );
+});
+
+// Professor sees requests for only their projects.
+app.get('/api/professors/:profId/project-requests', (req, res) => {
+  const { profId } = req.params;
+
+  const sql = `
+    select
+      ProjectRequest.Request_ID,
+      ProjectRequest.requestStatus,
+      ProjectRequest.requestDate,
+      Student.Student_ID,
+      Student.sname,
+      Student.semail,
+      Student.major,
+      Project.Proj_ID,
+      Project.projName,
+      Project.ptitle
+    from ProjectRequest
+    join Student on ProjectRequest.Student_ID = Student.Student_ID
+    join Project on ProjectRequest.Proj_ID = Project.Proj_ID
+    where Project.Prof_ID = ?
+    order by ProjectRequest.requestDate desc
+  `;
+
+  db.query(sql, [profId], (err, results) => {
+    if (err) return res.status(500).json({ message: err.sqlMessage });
+    res.json(results);
+  });
+});
+
+// Professor approves or rejects a project request.
+app.put('/api/project-requests/:requestId', (req, res) => {
+  const { requestId } = req.params;
+  const { requestStatus, role } = req.body;
+
+  if (!['Approved', 'Rejected'].includes(requestStatus)) {
+    return res.status(400).json({ message: 'invalid request status' });
+  }
+
+  db.query(
+    'select Student_ID, Proj_ID from ProjectRequest where Request_ID = ?',
+    [requestId],
+    (err, results) => {
+      if (err) return res.status(500).json({ message: err.sqlMessage });
+
+      if (results.length === 0) {
+        return res.status(404).json({ message: 'request not found' });
+      }
+
+      const request = results[0];
+
+      const updateRequest = () => {
+        db.query(
+          'update ProjectRequest set requestStatus = ? where Request_ID = ?',
+          [requestStatus, requestId],
+          (err) => {
+            if (err) return res.status(500).json({ message: err.sqlMessage });
+            res.json({ message: `request ${requestStatus.toLowerCase()} successfully!` });
+          }
+        );
+      };
+
+      if (requestStatus === 'Rejected') {
+        updateRequest();
+        return;
+      }
+
+      db.query(
+        'insert ignore into ProjectMember(Student_ID, Proj_ID, role, joinDate) values (?, ?, ?, CURDATE())',
+        [request.Student_ID, request.Proj_ID, role || 'Group Member'],
+        (err) => {
+          if (err) return res.status(500).json({ message: err.sqlMessage });
+          updateRequest();
+        }
+      );
     }
   );
 });

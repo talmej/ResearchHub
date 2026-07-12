@@ -97,10 +97,10 @@ function AuthPage({ setCurrentUser }) {
       <div className="auth-shell">
         {/* Left-side portal branding */}
         <section className="auth-brand-panel">
-          <p className="auth-eyebrow">Research Collaboration Portal</p>
+          <p className="auth-brand-name">ResearchHub</p>
           <p>
-            Track projects, milestones, reports, and feedback in one 
-            structured workspace.
+            Track projects, milestones, reports, and feedback 
+            all in one structured workspace.
           </p>
 
           <div className="auth-brand-pills">
@@ -111,7 +111,7 @@ function AuthPage({ setCurrentUser }) {
         </section>
 
         <div className="auth-card">
-          {/* Landing choice: sign in or register */}
+          {/* Landing choice: log in or register */}
           {!mode && (
             <div className="auth-heading">
               <h2>Your Research Journey Starts Here!</h2>
@@ -120,7 +120,7 @@ function AuthPage({ setCurrentUser }) {
 
           {!mode && (
             <div className="button-group">
-              <button onClick={() => setMode('login')}>Sign In</button>
+              <button onClick={() => setMode('login')}>Log In</button>
               <button onClick={() => setMode('register')}>Register</button>
             </div>
           )}
@@ -130,7 +130,7 @@ function AuthPage({ setCurrentUser }) {
             <div className="button-group">
               <div className="auth-heading">
                 <p className="auth-eyebrow">
-                  {mode === 'login' ? 'Sign in as' : 'Register as'}
+                  {mode === 'login' ? 'Log in as' : 'Register as'}
                 </p>
               </div>
 
@@ -245,7 +245,7 @@ function AuthPage({ setCurrentUser }) {
             <div className="button-group">
 
               <button type="submit">
-                {mode === 'login' ? 'Sign In' : 'Create Account'}
+                {mode === 'login' ? 'Log In' : 'Create Account'}
               </button>
 
               <button

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 function ProfDashboard({ currentUser, setCurrentUser }) {
   // Main dashboard data
@@ -7,6 +7,8 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
   const [students, setStudents] = useState([]);
   const [milestones, setMilestones] = useState([]);
   const [reports, setReports] = useState([]);
+  const [projectRequests, setProjectRequests] = useState([]);
+  const [stats, setStats] = useState(null);
 
   // Popup and selection state
   const [descriptionProject, setDescriptionProject] = useState(null);
@@ -38,7 +40,8 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     projName: '',
     ptitle: '',
     pstatus: '',
-    pdescription: ''
+    pdescription: '',
+    isPublic: '0'
   });
   
   const [milestoneForm, setMilestoneForm] = useState({
@@ -60,6 +63,17 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     setProjects(data);
     return data;
   };
+
+  const loadProfessorStats = async () => {
+    const res = await fetch(`http://127.0.0.1:5000/api/professors/${currentUser.id}/project-stats`);
+    const data = await res.json();
+
+    setStats(data);
+  };
+
+  useEffect(() => {
+    loadProfessorStats();
+  }, []);
 
   // Sidebar navigation actions
   const handleViewProjects = async () => {
@@ -88,6 +102,14 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     setView('reports');
   };
 
+  const handleViewRequests = async () => {
+    const res = await fetch(`http://127.0.0.1:5000/api/professors/${currentUser.id}/project-requests`);
+    const data = await res.json();
+
+    setProjectRequests(data);
+    setView('requests');
+  };
+
   // Create a new project or update an existing project status.
   const handleCreateProject = async (e) => {
     e.preventDefault();
@@ -102,9 +124,13 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     }
 
     const body = projectMode === 'update'
-      ? { pstatus: projectForm.pstatus }
+      ? {
+          pstatus: projectForm.pstatus,
+          isPublic: projectForm.isPublic === '1'
+        }
       : {
           ...projectForm,
+          isPublic: projectForm.isPublic === '1',
           Prof_ID: currentUser.id
         };
 
@@ -124,12 +150,34 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
         projName: '',
         ptitle: '',
         pstatus: '',
-        pdescription: ''
+        pdescription: '',
+        isPublic: '0'
       });
       setSelectedProjectId('');
       setProjectMode('create');
+      await loadProfessorStats();
 
       setView('');
+    }
+  };
+
+  const handleUpdateRequest = async (requestId, requestStatus) => {
+    const res = await fetch(`http://127.0.0.1:5000/api/project-requests/${requestId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        requestStatus,
+        role: 'Group Member'
+      })
+    });
+
+    const data = await res.json();
+    alert(data.message);
+
+    if (res.ok) {
+      await handleViewRequests();
     }
   };
 
@@ -343,14 +391,15 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     <div className="dashboard dashboard-shell professor-dashboard">
       <aside className="dashboard-sidebar">
         <div>
-          <h2>Research Portal</h2>
-          <p>Professor {lastName}</p>
+          <p>{currentUser.name}'s</p>
+          <h2>ResearchHub</h2>
         </div>
 
         <nav className="sidebar-nav">
           <button onClick={handleViewProjects}>View Projects</button>
           <button onClick={handleViewReports}>View Student Reports</button>
           <button onClick={handleShowProjectForm}>Create / Update Project</button>
+          <button onClick={handleViewRequests}>Project Requests</button>
           <button
             onClick={async () => {
               await loadProfessorProjects();
@@ -369,9 +418,50 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
 
       <main className="dashboard-content">
       {/* Professor dashboard home */}
-      {!view && <h1>Welcome, Professor {lastName}</h1>}
+      {!view && (
+        <>
+          {stats && (
+            <div className="dashboard-stats-stack">
+              <div className="stats-grid dashboard-home-stats stats-top-row">
+                <div className="stat-card">
+                  <span>Total Projects</span>
+                  <strong>{stats.totalProjects || 0}</strong>
+                </div>
 
-      {!view && <p className="dashboard-subtitle">What's on your mind?</p>}
+                <div className="stat-card">
+                  <span>Public</span>
+                  <strong>{stats.publicProjects || 0}</strong>
+                </div>
+
+                <div className="stat-card">
+                  <span>Private</span>
+                  <strong>{stats.privateProjects || 0}</strong>
+                </div>
+              </div>
+
+              <div className="stats-grid dashboard-home-stats stats-status-row">
+                <div className="stat-card stat-active">
+                  <span>Active</span>
+                  <strong>{stats.activeProjects || 0}</strong>
+                </div>
+
+                <div className="stat-card stat-planned">
+                  <span>Planned</span>
+                  <strong>{stats.plannedProjects || 0}</strong>
+                </div>
+
+                <div className="stat-card stat-completed">
+                  <span>Completed</span>
+                  <strong>{stats.completedProjects || 0}</strong>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <h1>Welcome, Professor {lastName}</h1>
+          <p className="dashboard-subtitle">What's on your mind?</p>
+        </>
+      )}
 
         {/* Project table action buttons */}
         {view === 'projects' && (
@@ -403,6 +493,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                 <th>Project Name</th>
                 <th>Title</th>
                 <th>Status</th>
+                <th>Visibility</th>
                 <th>Students</th>
                 <th>Roles</th>
                 <th>Description</th>
@@ -417,6 +508,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                   <td>{project.projName}</td>
                   <td>{project.ptitle}</td>
                   <td>{project.pstatus}</td>
+                  <td>{project.isPublic ? 'Public' : 'Private'}</td>
                   <td>{project.studentNames || 'No students enrolled yet'}</td>
                   <td>{project.studentRoles || '-'}</td>
                   <td>
@@ -437,6 +529,73 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                     </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Professor project request table */}
+      {view === 'requests' && (
+        <div className="dashboard-list">
+          <h2>Project Requests</h2>
+
+          <table className="projects-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Student</th>
+                <th>Email</th>
+                <th>Major</th>
+                <th>Project</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Decision</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {projectRequests.length === 0 ? (
+                <tr>
+                  <td colSpan="8">No project requests yet.</td>
+                </tr>
+              ) : (
+                projectRequests.map((request, index) => (
+                  <tr key={request.Request_ID}>
+                    <td>{index + 1}</td>
+                    <td>{request.sname}</td>
+                    <td>{request.semail}</td>
+                    <td>{request.major}</td>
+                    <td>{request.projName}</td>
+                    <td>{request.requestStatus}</td>
+                    <td>
+                      {request.requestDate
+                        ? new Date(request.requestDate).toLocaleDateString('en-US')
+                        : '-'}
+                    </td>
+                    <td>
+                      {request.requestStatus === 'Pending' ? (
+                        <div className="feedback-actions">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateRequest(request.Request_ID, 'Approved')}
+                          >
+                            Approve
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateRequest(request.Request_ID, 'Rejected')}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        request.requestStatus
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -696,7 +855,8 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                 projName: '',
                 ptitle: '',
                 pstatus: '',
-                pdescription: ''
+                pdescription: '',
+                isPublic: '0'
               });
             }}
           >
@@ -718,7 +878,8 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                   projName: selectedProject?.projName || '',
                   ptitle: selectedProject?.ptitle || '',
                   pstatus: selectedProject?.pstatus || '',
-                  pdescription: selectedProject?.pdescription || ''
+                  pdescription: selectedProject?.pdescription || '',
+                  isPublic: selectedProject?.isPublic ? '1' : '0'
                 });
               }}
             >
@@ -763,6 +924,16 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
             <option value="Planned">Planned</option>
             <option value="Active">Active</option>
             <option value="Completed">Completed</option>
+          </select>
+
+          <select
+            value={projectForm.isPublic}
+            onChange={(e) =>
+              setProjectForm({ ...projectForm, isPublic: e.target.value })
+            }
+          >
+            <option value="0">Private</option>
+            <option value="1">Public</option>
           </select>
 
           {projectMode === 'create' && (

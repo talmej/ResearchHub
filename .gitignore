@@ -1,0 +1,16 @@
+﻿# dependencies
+node_modules/
+sourcecodes/node_modules/
+sourcecodes/server/node_modules/
+
+# build output
+dist/
+sourcecodes/dist/
+
+# local environment files
+.env
+*.env
+sourcecodes/server/.env
+
+# local backups
+_backup_before_restore_*/

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 function StudentDashboard({ currentUser, setCurrentUser }) {
   // Main dashboard data
   const [projects, setProjects] = useState([]);
+  const [publicProjects, setPublicProjects] = useState([]);
+  const [stats, setStats] = useState(null);
   const [view, setView] = useState('');
   const [milestones, setMilestones] = useState([]);
   const [reports, setReports] = useState([]);
@@ -30,9 +32,26 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
     return data;
   };
 
+  const loadPublicProjects = async () => {
+    const res = await fetch(`http://127.0.0.1:5000/api/students/${currentUser.id}/public-projects`);
+    const data = await res.json();
+
+    setPublicProjects(data);
+    return data;
+  };
+
+  const loadStudentStats = async () => {
+    const res = await fetch(`http://127.0.0.1:5000/api/students/${currentUser.id}/project-stats`);
+    const data = await res.json();
+
+    setStats(data);
+  };
+
   // Load assigned projects for the permanent right sidebar.
   useEffect(() => {
     loadStudentProjects();
+    loadPublicProjects();
+    loadStudentStats();
   }, []);
 
   // Load milestones after the student chooses a project for a report.
@@ -51,8 +70,34 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
 
   // Student navigation actions
   const handleViewProjects = async () => {
-    await loadStudentProjects();
+    await loadPublicProjects();
     setView('projects');
+  };
+
+  const handleViewMyProjects = async () => {
+    await loadStudentProjects();
+    setView('myProjects');
+  };
+
+  const handleRequestProject = async (projectId) => {
+    const res = await fetch('http://127.0.0.1:5000/api/project-requests', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        Student_ID: currentUser.id,
+        Proj_ID: projectId
+      })
+    });
+
+    const data = await res.json();
+    alert(data.message);
+
+    if (res.ok) {
+      await loadPublicProjects();
+      await loadStudentStats();
+    }
   };
 
   const handleViewReports = async () => {
@@ -163,12 +208,14 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
     <div className="dashboard dashboard-shell student-dashboard has-right-sidebar">
       <aside className="dashboard-sidebar">
         <div>
-          <h2>Research Portal</h2>
-          <p>{currentUser.name}</p>
+          <p>{currentUser.name}'s</p>
+          <h2>ResearchHub</h2>
+          
         </div>
 
         <nav className="sidebar-nav">
           <button onClick={handleViewProjects}>View Projects</button>
+          <button onClick={handleViewMyProjects}>My Projects</button>
           <button onClick={handleViewReports}>Progress Reports</button>
         </nav>
 
@@ -181,6 +228,44 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
       {/* Student dashboard home */}
       {!view && (
         <>
+          {stats && (
+            <div className="dashboard-stats-stack">
+              <div className="stats-grid dashboard-home-stats stats-top-row">
+                <div className="stat-card">
+                  <span>My Projects</span>
+                  <strong>{stats.enrolledProjects || 0}</strong>
+                </div>
+
+                <div className="stat-card">
+                  <span>Pending Requests</span>
+                  <strong>{stats.pendingRequests || 0}</strong>
+                </div>
+
+                <div className="stat-card">
+                  <span>Available Projects</span>
+                  <strong>{publicProjects.length || 0}</strong>
+                </div>
+              </div>
+
+              <div className="stats-grid dashboard-home-stats stats-status-row">
+                <div className="stat-card stat-active">
+                  <span>Active</span>
+                  <strong>{stats.activeProjects || 0}</strong>
+                </div>
+
+                <div className="stat-card stat-planned">
+                  <span>Planned</span>
+                  <strong>{stats.plannedProjects || 0}</strong>
+                </div>
+
+                <div className="stat-card stat-completed">
+                  <span>Completed</span>
+                  <strong>{stats.completedProjects || 0}</strong>
+                </div>
+              </div>
+            </div>
+          )}
+
           <h1>Hey, {currentUser.name}</h1>
           <p className="dashboard-subtitle">What's on your mind?</p>
         </>
@@ -195,8 +280,68 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
         </div>
       )}
 
-      {/* Assigned projects table */}
+      {/* Public project listing table */}
       {view === 'projects' && (
+          <div className="dashboard-list">
+            <h2>Available Projects</h2>
+
+            <table className="projects-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Project Name</th>
+                  <th>Title</th>
+                  <th>Status</th>
+                  <th>Professor</th>
+                  <th>Description</th>
+                  <th>Request</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {publicProjects.length === 0 ? (
+                  <tr>
+                    <td colSpan="7">No public projects available right now.</td>
+                  </tr>
+                ) : (
+                publicProjects.map((project, index) => (
+                  <tr key={project.Proj_ID}>
+                    <td>{index + 1}</td>
+                    <td>{project.projName}</td>
+                    <td>{project.ptitle}</td>
+                    <td>{project.pstatus}</td>
+                    <td>{project.professorName}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleViewProjectDetails(project)}
+                      >
+                        View
+                      </button>
+                    </td>
+                    <td>
+                      {project.requestStatus === 'Pending' ? (
+                        'Pending'
+                      ) : project.requestStatus === 'Approved' ? (
+                        'Approved'
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRequestProject(project.Proj_ID)}
+                        >
+                          Request
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          </div>
+      )}
+
+      {/* Assigned projects table */}
+      {view === 'myProjects' && (
           <div className="dashboard-list">
             <h2>My Projects</h2>
 
@@ -214,7 +359,12 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
               </thead>
 
               <tbody>
-                {projects.map((project, index) => (
+                {projects.length === 0 ? (
+                  <tr>
+                    <td colSpan="7">You are not enrolled in any projects yet.</td>
+                  </tr>
+                ) : (
+                projects.map((project, index) => (
                   <tr key={project.Proj_ID}>
                     <td>{index + 1}</td>
                     <td>{project.projName}</td>
@@ -235,7 +385,7 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
                       </button>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
