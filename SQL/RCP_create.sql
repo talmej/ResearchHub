@@ -72,7 +72,7 @@ create table ProgressReport (
     prtitle varchar(200) not null,
     prtext varchar(2000) not null,
     createdAt date not null,
-    filepath varchar(255),
+    filepath varchar(2048),
     Mstone_ID int not null,
     Student_ID int not null,
 

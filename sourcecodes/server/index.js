@@ -2,6 +2,9 @@ const express = require('express');
 const mysql = require('mysql2');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 require('dotenv').config();
 
 const app = express();
@@ -9,6 +12,38 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+const uploadsDirectory = path.join(__dirname, 'uploads');
+fs.mkdirSync(uploadsDirectory, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDirectory,
+    filename: (req, file, callback) => {
+      const safeName = path
+        .basename(file.originalname)
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(-100);
+
+      callback(null, `${Date.now()}-${crypto.randomUUID()}-${safeName}`);
+    }
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => {
+    const allowedExtensions = new Set([
+      '.pdf', '.doc', '.docx', '.txt', '.csv', '.xls', '.xlsx',
+      '.png', '.jpg', '.jpeg'
+    ]);
+
+    if (!allowedExtensions.has(path.extname(file.originalname).toLowerCase())) {
+      return callback(new Error('unsupported report file type'));
+    }
+
+    callback(null, true);
+  }
+});
+
+app.use('/uploads', express.static(uploadsDirectory));
 
 // Password hashing settings
 const HASH_PREFIX = 'pbkdf2';
@@ -158,6 +193,7 @@ app.get('/api/students/:studentId/public-projects', (req, res) => {
       on Project.Proj_ID = ProjectRequest.Proj_ID
       and ProjectRequest.Student_ID = ?
     where Project.isPublic = 1
+      and Project.pstatus <> 'Completed'
       and ProjectMember.Student_ID is null
     order by Project.projName
   `;
@@ -357,7 +393,7 @@ app.post('/api/projects', (req, res) => {
 
   db.query(
     'insert into Project(projName, ptitle, pstatus, pdescription, isPublic, Prof_ID) values (?, ?, ?, ?, ?, ?)',
-    [projName, ptitle, pstatus, pdescription, isPublic ? 1 : 0, Prof_ID],
+    [projName, ptitle, pstatus, pdescription, pstatus === 'Completed' ? 0 : (isPublic ? 1 : 0), Prof_ID],
     (err, results) => {
       if (err) return res.status(500).json(err);
 
@@ -380,7 +416,7 @@ app.put('/api/projects/:projectId/status', (req, res) => {
 
   db.query(
     'update Project set pstatus = ?, isPublic = ? where Proj_ID = ?',
-    [pstatus, isPublic ? 1 : 0, projectId],
+    [pstatus, pstatus === 'Completed' ? 0 : (isPublic ? 1 : 0), projectId],
     (err, results) => {
       if (err) return res.status(500).json({ message: err.sqlMessage });
 
@@ -619,18 +655,40 @@ app.put('/api/milestones/:milestoneId', (req, res) => {
 // Progress report routes
 // -----------------------------
 
-app.post('/api/progress-reports', (req, res) => {
-  const { prtitle, prtext, filepath, Mstone_ID, Student_ID } = req.body;
+app.post('/api/progress-reports', upload.single('reportFile'), (req, res) => {
+  const { prtitle, prtext, fileUrl, Mstone_ID, Student_ID } = req.body;
 
   if (!prtitle || !prtext || !Mstone_ID || !Student_ID) {
+    if (req.file) fs.unlink(req.file.path, () => {});
     return res.status(400).json({ message: 'missing progress report information' });
+  }
+
+  let filepath = null;
+
+  if (req.file) {
+    filepath = `${req.protocol}://${req.get('host')}/uploads/${encodeURIComponent(req.file.filename)}`;
+  } else if (fileUrl) {
+    try {
+      const parsedUrl = new URL(fileUrl);
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('Unsupported URL protocol');
+      }
+
+      filepath = parsedUrl.href;
+    } catch {
+      return res.status(400).json({ message: 'file URL must be a valid http or https link' });
+    }
   }
 
   db.query(
     'insert into ProgressReport(prtitle, prtext, createdAt, filepath, Mstone_ID, Student_ID) values (?, ?, CURDATE(), ?, ?, ?)',
     [prtitle, prtext, filepath, Mstone_ID, Student_ID],
     (err, results) => {
-      if (err) return res.status(500).json({ message: err.sqlMessage });
+      if (err) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(500).json({ message: err.sqlMessage });
+      }
 
       res.json({
         message: 'progress report submitted successfully!',
@@ -760,6 +818,23 @@ app.post('/api/feedback', (req, res) => {
       });
     }
   );
+});
+
+// Keep upload failures JSON-shaped so the React client can display the message.
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'report file must be 10 MB or smaller'
+      : err.message;
+
+    return res.status(400).json({ message });
+  }
+
+  if (err?.message === 'unsupported report file type') {
+    return res.status(400).json({ message: err.message });
+  }
+
+  next(err);
 });
 
 const PORT = process.env.PORT || 5000;

@@ -9,6 +9,8 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
   const [view, setView] = useState('');
   const [milestones, setMilestones] = useState([]);
   const [reports, setReports] = useState([]);
+  const [reportFile, setReportFile] = useState(null);
+  const [attachmentMode, setAttachmentMode] = useState('file');
 
   // Popup state
   const [descriptionProject, setDescriptionProject] = useState(null);
@@ -22,7 +24,7 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
     Mstone_ID: '',
     prtitle: '',
     prtext: '',
-    filepath: ''
+    fileUrl: ''
   });
 
   const loadStudentProjects = async () => {
@@ -114,15 +116,21 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
   const handleAddReport = async (e) => {
     e.preventDefault();
 
+    const formData = new FormData();
+    formData.append('Proj_ID', reportForm.Proj_ID);
+    formData.append('Mstone_ID', reportForm.Mstone_ID);
+    formData.append('prtitle', reportForm.prtitle);
+    formData.append('prtext', reportForm.prtext);
+    formData.append('fileUrl', reportForm.fileUrl);
+    formData.append('Student_ID', currentUser.id);
+
+    if (reportFile) {
+      formData.append('reportFile', reportFile);
+    }
+
     const res = await fetch('http://127.0.0.1:5000/api/progress-reports', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        ...reportForm,
-        Student_ID: currentUser.id
-      })
+      body: formData
     });
 
     const data = await res.json();
@@ -134,8 +142,10 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
         Mstone_ID: '',
         prtitle: '',
         prtext: '',
-        filepath: ''
+        fileUrl: ''
       });
+      setReportFile(null);
+      setAttachmentMode('file');
 
       setMilestones([]);
       await handleViewReports();
@@ -155,7 +165,7 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
   const getReportLinkHref = (filepath) => {
     try {
       return new URL(filepath).href;
-    } catch (err) {
+    } catch {
       return '#';
     }
   };
@@ -165,7 +175,7 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
 
     try {
       new URL(selectedReport.filepath);
-    } catch (err) {
+    } catch {
       e.preventDefault();
       setLinkMessage('Link trouble. Please verify the file link is valid.');
     }
@@ -500,14 +510,52 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
           }
         />
 
-        <input
-          type="text"
-          placeholder="File path or link"
-          value={reportForm.filepath}
-          onChange={(e) =>
-            setReportForm({ ...reportForm, filepath: e.target.value })
-          }
-        />
+        <div className="report-attachment-box">
+          <div className="attachment-toggle" aria-label="Attachment type">
+            <button
+              type="button"
+              className={attachmentMode === 'file' ? 'active' : ''}
+              aria-pressed={attachmentMode === 'file'}
+              onClick={() => {
+                setAttachmentMode('file');
+                setReportForm({ ...reportForm, fileUrl: '' });
+              }}
+            >
+              File Upload
+            </button>
+            <button
+              type="button"
+              className={attachmentMode === 'url' ? 'active' : ''}
+              aria-pressed={attachmentMode === 'url'}
+              onClick={() => {
+                setAttachmentMode('url');
+                setReportFile(null);
+              }}
+            >
+              Add URL
+            </button>
+          </div>
+
+          {attachmentMode === 'file' ? (
+            <div className="attachment-input">
+              <input
+                key="report-file-input"
+                id="report-file"
+                type="file"
+                onChange={(e) => setReportFile(e.target.files[0] || null)}
+              />
+            </div>
+          ) : (
+            <input
+              type="url"
+              placeholder="Paste a URL here"
+              value={reportForm.fileUrl}
+              onChange={(e) =>
+                setReportForm({ ...reportForm, fileUrl: e.target.value })
+              }
+            />
+          )}
+        </div>
 
         <button type="submit">Submit Progress Report</button>
       </form>
@@ -652,7 +700,7 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
             return (
               <div className="teammate-group" key={project.Proj_ID}>
                 {teammates.length === 0 ? (
-                  <p className="empty-note">No members assigned yet.</p>
+                  null
                 ) : (
                   teammates.map((member) => (
                     <div className="teammate-row" key={`${project.Proj_ID}-${member.name}-${member.role}`}>

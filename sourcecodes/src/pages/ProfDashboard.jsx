@@ -16,6 +16,10 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
   const [selectedReport, setSelectedReport] = useState(null);
   const [reportPreview, setReportPreview] = useState(null);
   const [feedbackPreview, setFeedbackPreview] = useState(null);
+  const [projectStudentsPreview, setProjectStudentsPreview] = useState(null);
+  const [showProjectStats, setShowProjectStats] = useState(false);
+  const [projectStatsReports, setProjectStatsReports] = useState([]);
+  const [projectListPreview, setProjectListPreview] = useState(null);
 
   // Form mode state
   const [customRole, setCustomRole] = useState('');
@@ -73,6 +77,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
 
   useEffect(() => {
     loadProfessorStats();
+    loadProfessorProjects();
   }, []);
 
   // Sidebar navigation actions
@@ -110,6 +115,14 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     setView('requests');
   };
 
+  const handleShowProjectStats = async () => {
+    const res = await fetch(`http://127.0.0.1:5000/api/professors/${currentUser.id}/progress-reports`);
+    const data = await res.json();
+
+    setProjectStatsReports(res.ok ? data : []);
+    setShowProjectStats(true);
+  };
+
   // Create a new project or update an existing project status.
   const handleCreateProject = async (e) => {
     e.preventDefault();
@@ -126,11 +139,15 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     const body = projectMode === 'update'
       ? {
           pstatus: projectForm.pstatus,
-          isPublic: projectForm.isPublic === '1'
+          isPublic: projectForm.pstatus === 'Completed'
+            ? false
+            : projectForm.isPublic === '1'
         }
       : {
           ...projectForm,
-          isPublic: projectForm.isPublic === '1',
+          isPublic: projectForm.pstatus === 'Completed'
+            ? false
+            : projectForm.isPublic === '1',
           Prof_ID: currentUser.id
         };
 
@@ -178,6 +195,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
 
     if (res.ok) {
       await handleViewRequests();
+      await loadProfessorProjects();
     }
   };
 
@@ -387,11 +405,85 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
     setMilestoneProject(project);
   };
 
+  const getInitials = (name) => {
+    if (!name) return '?';
+
+    return name
+      .split(' ')
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
+  // Build a unique student list from the professor's already-loaded projects.
+  const assignedStudents = Array.from(
+    projects.reduce((studentMap, project) => {
+      const names = project.studentNames ? project.studentNames.split(', ') : [];
+      const roles = project.studentRoles ? project.studentRoles.split(', ') : [];
+
+      names.forEach((name, index) => {
+        const existingStudent = studentMap.get(name) || {
+          name,
+          roles: new Set(),
+          projects: new Set()
+        };
+
+        if (roles[index]) existingStudent.roles.add(roles[index]);
+        existingStudent.projects.add(project.projName);
+        studentMap.set(name, existingStudent);
+      });
+
+      return studentMap;
+    }, new Map()).values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
+
+  const studentProjectCounts = new Map(
+    assignedStudents.map((student) => [student.name, student.projects.size])
+  );
+
+  const totalProjects = Number(stats?.totalProjects || 0);
+  const activeProjects = Number(stats?.activeProjects || 0);
+  const plannedProjects = Number(stats?.plannedProjects || 0);
+  const completedProjects = Number(stats?.completedProjects || 0);
+  const chartTotal = totalProjects || 1;
+  const activeEnd = (activeProjects / chartTotal) * 100;
+  const plannedEnd = activeEnd + (plannedProjects / chartTotal) * 100;
+  const completedEnd = plannedEnd + (completedProjects / chartTotal) * 100;
+  const multiProjectStudents = assignedStudents.filter(
+    (student) => student.projects.size > 1
+  ).length;
+  const activeStudentNames = new Set(
+    projects
+      .filter((project) => project.pstatus === 'Active' && project.studentNames)
+      .flatMap((project) => project.studentNames.split(', '))
+  );
+  const projectsByStatus = (status) => projects.filter(
+    (project) => project.pstatus === status
+  );
+  const projectsByVisibility = (isPublic) => projects.filter((project) => isPublic
+    ? project.pstatus !== 'Completed' && Boolean(project.isPublic)
+    : project.pstatus === 'Completed' || !Boolean(project.isPublic));
+  const projectPreviewText = (projectList) => {
+    if (projectList.length === 0) return 'No projects';
+
+    const visibleNames = projectList.slice(0, 2).map((project) => project.projName);
+    return projectList.length > 3
+      ? `${visibleNames.join(', ')}, ... (click to view all)`
+      : projectList.map((project) => project.projName).join(', ');
+  };
+  const openProjectList = (label, projectList) => {
+    if (projectList.length > 3) {
+      setProjectListPreview({ label, projects: projectList });
+    }
+  };
+
   return (
-    <div className="dashboard dashboard-shell professor-dashboard">
+    <div className="dashboard dashboard-shell professor-dashboard has-right-sidebar">
       <aside className="dashboard-sidebar">
         <div>
-          <p>{currentUser.name}'s</p>
+          <p>{currentUser.name} (professor)</p>
           <h2>ResearchHub</h2>
         </div>
 
@@ -400,16 +492,44 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
           <button onClick={handleViewReports}>View Student Reports</button>
           <button onClick={handleShowProjectForm}>Create / Update Project</button>
           <button onClick={handleViewRequests}>Project Requests</button>
+        </nav>
+
+        <section className="professor-sidebar-stats" aria-label="Professor dashboard statistics">
           <button
-            onClick={async () => {
-              await loadProfessorProjects();
-              setMilestoneReturnView('');
-              setView('addMilestone');
+            type="button"
+            className="sidebar-stats-title"
+            onClick={handleShowProjectStats}
+          >
+            Project Stats
+          </button>
+
+          <div className="sidebar-project-numbers">
+            <span className="active"><strong>{activeProjects}</strong>Active</span>
+            <span className="planned"><strong>{plannedProjects}</strong>Planned</span>
+            <span className="completed"><strong>{completedProjects}</strong>Completed</span>
+          </div>
+
+          <div
+            className="project-stats-donut"
+            style={{
+              '--active-end': `${activeEnd}%`,
+              '--planned-end': `${plannedEnd}%`,
+              '--completed-end': `${completedEnd}%`
             }}
           >
-            Milestones
-          </button>
-        </nav>
+            <div>
+              <strong>{totalProjects}</strong>
+              <span>Projects</span>
+            </div>
+          </div>
+
+          <div className="sidebar-student-stats">
+            <h3>Student Stats</h3>
+            <div><span>Assigned Students</span><strong>{assignedStudents.length}</strong></div>
+            <div><span>On Active Projects</span><strong>{activeStudentNames.size}</strong></div>
+            <div><span>Multi-Project</span><strong>{multiProjectStudents}</strong></div>
+          </div>
+        </section>
 
         <button className="sidebar-logout" onClick={() => setCurrentUser(null)}>
           Log Out
@@ -423,34 +543,58 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
           {stats && (
             <div className="dashboard-stats-stack">
               <div className="stats-grid dashboard-home-stats stats-top-row">
-                <div className="stat-card">
+                <div
+                  className={`stat-card stats-tooltip ${projects.length > 3 ? 'clickable-stat-card' : ''}`}
+                  data-tooltip={projectPreviewText(projects)}
+                  onClick={() => openProjectList('All Projects', projects)}
+                >
                   <span>Total Projects</span>
                   <strong>{stats.totalProjects || 0}</strong>
                 </div>
 
-                <div className="stat-card">
+                <div
+                  className={`stat-card stats-tooltip ${projectsByVisibility(true).length > 3 ? 'clickable-stat-card' : ''}`}
+                  data-tooltip={projectPreviewText(projectsByVisibility(true))}
+                  onClick={() => openProjectList('Public Projects', projectsByVisibility(true))}
+                >
                   <span>Public</span>
                   <strong>{stats.publicProjects || 0}</strong>
                 </div>
 
-                <div className="stat-card">
+                <div
+                  className={`stat-card stats-tooltip ${projectsByVisibility(false).length > 3 ? 'clickable-stat-card' : ''}`}
+                  data-tooltip={projectPreviewText(projectsByVisibility(false))}
+                  onClick={() => openProjectList('Private Projects', projectsByVisibility(false))}
+                >
                   <span>Private</span>
                   <strong>{stats.privateProjects || 0}</strong>
                 </div>
               </div>
 
               <div className="stats-grid dashboard-home-stats stats-status-row">
-                <div className="stat-card stat-active">
+                <div
+                  className={`stat-card stat-active stats-tooltip ${projectsByStatus('Active').length > 3 ? 'clickable-stat-card' : ''}`}
+                  data-tooltip={projectPreviewText(projectsByStatus('Active'))}
+                  onClick={() => openProjectList('Active Projects', projectsByStatus('Active'))}
+                >
                   <span>Active</span>
                   <strong>{stats.activeProjects || 0}</strong>
                 </div>
 
-                <div className="stat-card stat-planned">
+                <div
+                  className={`stat-card stat-planned stats-tooltip ${projectsByStatus('Planned').length > 3 ? 'clickable-stat-card' : ''}`}
+                  data-tooltip={projectPreviewText(projectsByStatus('Planned'))}
+                  onClick={() => openProjectList('Planned Projects', projectsByStatus('Planned'))}
+                >
                   <span>Planned</span>
                   <strong>{stats.plannedProjects || 0}</strong>
                 </div>
 
-                <div className="stat-card stat-completed">
+                <div
+                  className={`stat-card stat-completed stats-tooltip ${projectsByStatus('Completed').length > 3 ? 'clickable-stat-card' : ''}`}
+                  data-tooltip={projectPreviewText(projectsByStatus('Completed'))}
+                  onClick={() => openProjectList('Completed Projects', projectsByStatus('Completed'))}
+                >
                   <span>Completed</span>
                   <strong>{stats.completedProjects || 0}</strong>
                 </div>
@@ -467,7 +611,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
         {view === 'projects' && (
         <div className="prof-main-buttons">
             <button onClick={handleShowAddStudent}>
-            Add Student
+            + Students
             </button>
 
             <button
@@ -476,7 +620,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                 setView('addMilestone');
               }}
             >
-            Milestones
+            + Milestones
             </button>
         </div>
         )}
@@ -494,8 +638,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                 <th>Title</th>
                 <th>Status</th>
                 <th>Visibility</th>
-                <th>Students</th>
-                <th>Roles</th>
+                <th>Students & Roles</th>
                 <th>Description</th>
                 <th>Milestones</th>
               </tr>
@@ -507,10 +650,25 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
                   <td>{index + 1}</td>
                   <td>{project.projName}</td>
                   <td>{project.ptitle}</td>
-                  <td>{project.pstatus}</td>
-                  <td>{project.isPublic ? 'Public' : 'Private'}</td>
-                  <td>{project.studentNames || 'No students enrolled yet'}</td>
-                  <td>{project.studentRoles || '-'}</td>
+                  <td>
+                    <span className={`project-status-label status-${project.pstatus.toLowerCase()}`}>
+                      {project.pstatus}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`project-visibility-label status-${project.pstatus.toLowerCase()}`}>
+                      {project.pstatus === 'Completed' ? 'Private' : (project.isPublic ? 'Public' : 'Private')}
+                    </span>
+                  </td>
+                  <td className="project-student-count-cell">
+                    <button
+                      type="button"
+                      className="project-student-count"
+                      onClick={() => setProjectStudentsPreview(project)}
+                    >
+                      {project.studentNames ? project.studentNames.split(', ').length : 0}
+                    </button>
+                  </td>
                   <td>
                     <button
                       type="button"
@@ -916,9 +1074,14 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
 
           <select
             value={projectForm.pstatus}
-            onChange={(e) =>
-              setProjectForm({ ...projectForm, pstatus: e.target.value })
-            }
+            onChange={(e) => {
+              const status = e.target.value;
+              setProjectForm({
+                ...projectForm,
+                pstatus: status,
+                isPublic: status === 'Completed' ? '0' : projectForm.isPublic
+              });
+            }}
           >
             <option value="">Select Status</option>
             <option value="Planned">Planned</option>
@@ -931,6 +1094,7 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
             onChange={(e) =>
               setProjectForm({ ...projectForm, isPublic: e.target.value })
             }
+            disabled={projectForm.pstatus === 'Completed'}
           >
             <option value="0">Private</option>
             <option value="1">Public</option>
@@ -966,6 +1130,41 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
 
             <h2>{descriptionProject.projName}</h2>
             <p>{descriptionProject.pdescription}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Compact student and role list for a project */}
+      {projectStudentsPreview && (
+        <div className="description-popup">
+          <div className="description-box project-students-popup">
+            <button
+              type="button"
+              className="description-close"
+              onClick={() => setProjectStudentsPreview(null)}
+            >
+              X
+            </button>
+
+            <h3>{projectStudentsPreview.projName}</h3>
+            {projectStudentsPreview.studentNames ? (
+              <ul>
+                {projectStudentsPreview.studentNames.split(', ').map((name, index) => {
+                  const roles = projectStudentsPreview.studentRoles
+                    ? projectStudentsPreview.studentRoles.split(', ')
+                    : [];
+
+                  return (
+                    <li key={`${name}-${index}`}>
+                      <strong>{name}</strong>
+                      <span>{roles[index] || 'Member'}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="empty-note">No students enrolled.</p>
+            )}
           </div>
         </div>
       )}
@@ -1112,6 +1311,165 @@ function ProfDashboard({ currentUser, setCurrentUser }) {
           </div>
         )}
       </main>
+
+      {projectListPreview && (
+        <div className="description-popup">
+          <div className="description-box stat-project-list-popup">
+            <button
+              type="button"
+              className="description-close"
+              onClick={() => setProjectListPreview(null)}
+            >
+              X
+            </button>
+
+            <h3>{projectListPreview.label}</h3>
+            <div className="stat-project-list-heading">
+              <span>Project</span>
+              <span>Students</span>
+            </div>
+            <ul>
+              {projectListPreview.projects.map((project) => (
+                <li key={project.Proj_ID}>
+                  <span>{project.projName}</span>
+                  <strong>
+                    {project.studentNames ? project.studentNames.split(', ').length : 0}
+                  </strong>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {showProjectStats && (
+        <div className="description-popup">
+          <div className="description-box detailed-project-stats-popup">
+            <button
+              type="button"
+              className="description-close"
+              onClick={() => setShowProjectStats(false)}
+            >
+              X
+            </button>
+
+            <div className="detailed-stats-heading">
+              <div>
+                <p>Portfolio Overview</p>
+                <h2>Project Statistics</h2>
+              </div>
+              <strong>{projectStatsReports.length} reports submitted</strong>
+            </div>
+
+            <div className="detailed-project-grid">
+              {projects.map((project) => {
+                const names = project.studentNames ? project.studentNames.split(', ') : [];
+                const roles = project.studentRoles ? project.studentRoles.split(', ') : [];
+                const projectReports = projectStatsReports.filter(
+                  (report) => report.projName === project.projName
+                );
+                const pendingFeedback = projectReports.filter(
+                  (report) => !report.fdbckTitle
+                ).length;
+                const reportingStudents = new Set(
+                  projectReports.map((report) => report.studentName)
+                ).size;
+
+                return (
+                  <article className="detailed-project-card" key={project.Proj_ID}>
+                    <header>
+                      <div>
+                        <h3>{project.projName}</h3>
+                        <span>{project.pstatus} · {project.pstatus === 'Completed' ? 'Private' : (project.isPublic ? 'Public' : 'Private')}</span>
+                      </div>
+                      <strong>{projectReports.length} reports</strong>
+                    </header>
+
+                    <div className="project-report-summary">
+                      <span>{names.length} members</span>
+                      <span>{reportingStudents}/{names.length} submitted</span>
+                      <span>{pendingFeedback} pending feedback</span>
+                    </div>
+
+                    {names.length === 0 ? (
+                      <p className="empty-note">No students assigned.</p>
+                    ) : (
+                      <ul>
+                        {names.map((name, index) => {
+                          const memberReports = projectReports.filter(
+                            (report) => report.studentName === name
+                          );
+
+                          return (
+                            <li key={`${project.Proj_ID}-${name}`}>
+                              <div>
+                                <strong>{name}</strong>
+                                <span>{roles[index] || 'Member'}</span>
+                              </div>
+                              <b className={memberReports.length ? 'has-reports' : ''}>
+                                {memberReports.length} {memberReports.length === 1 ? 'report' : 'reports'}
+                              </b>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent professor student sidebar */}
+      <aside className="right-dashboard-sidebar">
+        <h2>Your Students</h2>
+
+        <div className="student-project-legend" aria-label="Student project activity legend">
+          <span className="legend-item one-project">1 Project</span>
+          <span className="legend-item two-projects">2 Projects</span>
+          <span className="legend-item active-student">
+            <i aria-hidden="true"></i>
+            3+ Projects
+          </span>
+        </div>
+
+        {assignedStudents.length === 0 ? (
+          <p className="empty-note">No students assigned yet.</p>
+        ) : (
+          <div className="professor-student-projects">
+            {projects.filter((project) => project.studentNames).map((project) => {
+              const names = project.studentNames.split(', ');
+              const roles = project.studentRoles ? project.studentRoles.split(', ') : [];
+
+              return (
+                <section className="project-student-group" key={project.Proj_ID}>
+                  <h3>{project.projName}</h3>
+                  <div className="project-student-list">
+                    {names.map((name, index) => (
+                      <div
+                        className={`teammate-row student-project-level-${Math.min(studentProjectCounts.get(name) || 1, 3)}`}
+                        key={`${project.Proj_ID}-${name}`}
+                      >
+                        <span
+                          className={`teammate-initials ${studentProjectCounts.get(name) === 2 ? 'multi-project' : ''} ${studentProjectCounts.get(name) >= 3 ? 'active-student' : ''}`}
+                        >
+                          {getInitials(name)}
+                        </span>
+                        <div className="teammate-info">
+                          <p>{name}</p>
+                          <span>{roles[index] || 'Member'}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </aside>
     </div>
   );
 }
