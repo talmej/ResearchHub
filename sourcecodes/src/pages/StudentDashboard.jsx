@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 function StudentDashboard({ currentUser, setCurrentUser }) {
   // Main dashboard data
+  const roleLabel = currentUser.role ? `(${currentUser.role})` : '';
   const [projects, setProjects] = useState([]);
   const [publicProjects, setPublicProjects] = useState([]);
   const [stats, setStats] = useState(null);
@@ -208,13 +209,13 @@ function StudentDashboard({ currentUser, setCurrentUser }) {
     <div className="dashboard dashboard-shell student-dashboard has-right-sidebar">
       <aside className="dashboard-sidebar">
         <div>
-          <p>{currentUser.name}'s</p>
+          <p>{currentUser.name} {roleLabel}</p>
           <h2>ResearchHub</h2>
           
         </div>
 
         <nav className="sidebar-nav">
-          <button onClick={handleViewProjects}>View Projects</button>
+          <button onClick={handleViewProjects}>Available Projects</button>
           <button onClick={handleViewMyProjects}>My Projects</button>
           <button onClick={handleViewReports}>Progress Reports</button>
         </nav>

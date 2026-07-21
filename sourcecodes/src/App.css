@@ -719,3 +719,11 @@ button:hover {
   padding: 8px 10px;
   font-size: 13px;
 }
+
+.sidebar-role-mark {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.7;
+  text-transform: lowercase;
+}
